@@ -1,4 +1,5 @@
-import { Zap, Download } from 'lucide-react'
+import { useState } from 'react'
+import { Zap, Download, Check, Save } from 'lucide-react'
 import { useShiftStore } from '../store/shiftStore'
 import { ShiftTable } from '../components/shift/ShiftTable'
 import { ViolationPanel } from '../components/shift/ViolationPanel'
@@ -6,6 +7,13 @@ import { DebugPanel } from '../components/shift/DebugPanel'
 
 export function ShiftPage() {
   const { currentShift, generateShift, viewYear, viewMonth } = useShiftStore()
+  const [savedToast, setSavedToast] = useState(false)
+
+  // データは常時自動保存されているので、ボタンは「保存済み」を明示するだけ
+  const handleSave = () => {
+    setSavedToast(true)
+    setTimeout(() => setSavedToast(false), 2000)
+  }
 
   return (
     <div className="flex flex-col gap-0 pb-20">
@@ -21,6 +29,13 @@ export function ShiftPage() {
 
         {currentShift && (
           <>
+            <button
+              onClick={handleSave}
+              className="flex items-center gap-1 text-gray-600 text-sm px-2 py-1.5 rounded-lg hover:bg-gray-100 border border-gray-200"
+            >
+              <Save size={15} />
+              保存
+            </button>
             <button className="flex items-center gap-1 text-gray-500 text-sm px-2 py-1.5 rounded-lg hover:bg-gray-100 border border-gray-200">
               <Download size={15} />
               Excel
@@ -31,6 +46,14 @@ export function ShiftPage() {
           </>
         )}
       </div>
+
+      {/* 保存トースト */}
+      {savedToast && (
+        <div className="fixed top-20 left-1/2 -translate-x-1/2 z-50 flex items-center gap-1.5 bg-green-600 text-white text-sm font-medium px-4 py-2 rounded-full shadow-lg">
+          <Check size={16} />
+          保存しました
+        </div>
+      )}
 
       {/* 違反パネル */}
       <ViolationPanel />

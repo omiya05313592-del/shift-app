@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { persist } from 'zustand/middleware'
 import type {
   Department, Staff, StaffRule, PairConstraint,
   ShiftStatus, MonthlyShift,
@@ -11,6 +12,13 @@ import {
   CORE_WORK_DAYS, ARBEIT_MAX_PER_DAY,
 } from '../data/dummy'
 import { generateShift } from '../utils/shiftGenerator'
+
+// 一意なIDを生成（同一ミリ秒での重複を防ぐ）
+let uidCounter = 0
+function uid(prefix: string): string {
+  uidCounter += 1
+  return `${prefix}-${Date.now()}-${uidCounter}`
+}
 
 type Page = 'shift' | 'requests' | 'admin'
 
@@ -54,6 +62,7 @@ type ShiftStore = {
   addLeaveRequest: (req: Omit<LeaveRequest, 'id'>) => void
   approveLeave: (id: string) => void
   rejectLeave: (id: string) => void
+  removeLeaveRequest: (id: string) => void
 
   // ===== 勤務状態操作 =====
   addStatusPeriod: (period: Omit<StaffStatusPeriod, 'id'>) => void
@@ -92,7 +101,9 @@ type ShiftStore = {
 
 const now = new Date()
 
-export const useShiftStore = create<ShiftStore>((set, get) => ({
+export const useShiftStore = create<ShiftStore>()(
+  persist(
+    (set, get) => ({
   departments: DEPARTMENTS,
   staffList: STAFF_LIST,
   staffRules: STAFF_RULES,
@@ -177,7 +188,7 @@ export const useShiftStore = create<ShiftStore>((set, get) => ({
   },
 
   addLeaveRequest: (req) => {
-    const id = `leave-${Date.now()}`
+    const id = uid('leave')
     set(state => ({
       leaveRequests: [...state.leaveRequests, { ...req, id }],
     }))
@@ -199,8 +210,14 @@ export const useShiftStore = create<ShiftStore>((set, get) => ({
     }))
   },
 
+  removeLeaveRequest: (id) => {
+    set(state => ({
+      leaveRequests: state.leaveRequests.filter(r => r.id !== id),
+    }))
+  },
+
   addStatusPeriod: (period) => {
-    const id = `sp-${Date.now()}`
+    const id = uid('sp')
     set(state => ({ statusPeriods: [...state.statusPeriods, { ...period, id }] }))
   },
 
@@ -237,7 +254,7 @@ export const useShiftStore = create<ShiftStore>((set, get) => ({
   },
 
   addStaff: (staff) => {
-    const id = `s-${Date.now()}`
+    const id = uid('s')
     set(state => ({ staffList: [...state.staffList, { ...staff, id }] }))
   },
 
@@ -252,12 +269,12 @@ export const useShiftStore = create<ShiftStore>((set, get) => ({
   },
 
   addDepartment: (dept) => {
-    const id = `dept-${Date.now()}`
+    const id = uid('dept')
     set(state => ({ departments: [...state.departments, { ...dept, id }] }))
   },
 
   addRequiredConfig: (config) => {
-    const id = `req-${Date.now()}`
+    const id = uid('req')
     set(state => ({ requiredConfigs: [...state.requiredConfigs, { ...config, id }] }))
   },
   updateRequiredConfig: (id, data) => {
@@ -270,7 +287,7 @@ export const useShiftStore = create<ShiftStore>((set, get) => ({
   },
 
   addStaffRule: (rule) => {
-    const id = `rule-${Date.now()}`
+    const id = uid('rule')
     set(state => ({ staffRules: [...state.staffRules, { ...rule, id }] }))
   },
   updateStaffRule: (id, data) => {
@@ -283,7 +300,7 @@ export const useShiftStore = create<ShiftStore>((set, get) => ({
   },
 
   addPairConstraint: (pair) => {
-    const id = `pair-${Date.now()}`
+    const id = uid('pair')
     set(state => ({ pairConstraints: [...state.pairConstraints, { ...pair, id }] }))
   },
   removePairConstraint: (id) => {
@@ -291,10 +308,46 @@ export const useShiftStore = create<ShiftStore>((set, get) => ({
   },
 
   addException: (exc) => {
-    const id = `exc-${Date.now()}`
+    const id = uid('exc')
     set(state => ({ exceptions: [...state.exceptions, { ...exc, id }] }))
   },
   removeException: (id) => {
     set(state => ({ exceptions: state.exceptions.filter(e => e.id !== id) }))
   },
-}))
+    }),
+    {
+      name: 'shift-app-store',   // localStorage のキー
+      version: 2,                // スキーマ変更時に上げる（migrate で移行）
+      // 旧バージョンの保存データを新スキーマへ移行
+      migrate: (persisted: unknown, version: number) => {
+        const state = persisted as Partial<ShiftStore>
+        // v2: 部署名「レジ」→「接客」
+        if (version < 2 && Array.isArray(state.departments)) {
+          state.departments = state.departments.map(d =>
+            d.id === 'dept-cashier' && d.name === 'レジ' ? { ...d, name: '接客' } : d
+          )
+        }
+        return state as ShiftStore
+      },
+      // 保存対象を明示（currentPage などの一時的なUI状態は保存しない）
+      partialize: (state) => ({
+        departments: state.departments,
+        staffList: state.staffList,
+        staffRules: state.staffRules,
+        pairConstraints: state.pairConstraints,
+        requiredConfigs: state.requiredConfigs,
+        exceptions: state.exceptions,
+        statusPeriods: state.statusPeriods,
+        coreWorkDays: state.coreWorkDays,
+        arbeitMaxPerDay: state.arbeitMaxPerDay,
+        viewYear: state.viewYear,
+        viewMonth: state.viewMonth,
+        currentShift: state.currentShift,
+        violations: state.violations,
+        leaveRequests: state.leaveRequests,
+        unavailableDates: state.unavailableDates,
+        arbeitAvailabilities: state.arbeitAvailabilities,
+      }),
+    },
+  ),
+)

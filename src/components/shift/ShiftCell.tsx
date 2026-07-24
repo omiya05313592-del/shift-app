@@ -10,6 +10,7 @@ type Props = {
   status: ShiftStatus
   isLocked: boolean
   isClosed: boolean      // 定休日（店が休み）
+  isRequested?: boolean  // 承認済み希望休（申請由来）の休み
 }
 
 const STATUS_CLASS: Record<ShiftStatus, string> = {
@@ -20,10 +21,12 @@ const STATUS_CLASS: Record<ShiftStatus, string> = {
   absent:    'cell-absent',
 }
 
-export function ShiftCell({ staffId, date, status, isLocked, isClosed }: Props) {
+export function ShiftCell({ staffId, date, status, isLocked, isClosed, isRequested }: Props) {
   const { updateEntry, toggleLock } = useShiftStore()
 
   const isAbsent = status === 'absent'
+  // 申請由来かつ実際に休み（公休/有給）のときだけマーカー表示
+  const showRequestMark = !!isRequested && (status === 'off' || status === 'paid_leave')
 
   const handleClick = () => {
     if (isClosed || isLocked || isAbsent) return
@@ -55,10 +58,22 @@ export function ShiftCell({ staffId, date, status, isLocked, isClosed }: Props) 
         STATUS_CLASS[status],
         (isClosed || isAbsent) && 'opacity-50 cursor-default',
         isLocked && 'ring-1 ring-amber-400 ring-inset',
+        showRequestMark && 'ring-2 ring-rose-400 ring-inset',
       )}
-      title={isLocked ? 'ロック中（長押しで解除）' : '長押しでロック'}
+      title={
+        showRequestMark ? '申請由来の休み'
+          : isLocked ? 'ロック中（長押しで解除）'
+          : '長押しでロック'
+      }
     >
       {SHIFT_STATUS_LABEL[status]}
+      {/* 申請由来マーカー（左下の三角） */}
+      <span
+        className={clsx(
+          'absolute bottom-0 left-0 w-0 h-0 border-l-[6px] border-b-[6px] border-l-transparent border-b-rose-500',
+          showRequestMark ? 'opacity-100' : 'opacity-0',
+        )}
+      />
       <Lock
         size={8}
         className={clsx(

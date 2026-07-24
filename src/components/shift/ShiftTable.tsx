@@ -1,6 +1,7 @@
 import { useMemo, Fragment, useState } from 'react'
 import { useShiftStore } from '../../store/shiftStore'
 import { buildMonthDays } from '../../utils/calendar'
+import { getRequiredCount } from '../../utils/shiftGenerator'
 import { ShiftCell } from './ShiftCell'
 import clsx from 'clsx'
 import type { ShiftStatus } from '../../types'
@@ -25,7 +26,7 @@ type ViewFilter = 'all' | 'regular' | 'arbeit'
 export function ShiftTable() {
   const {
     viewYear, viewMonth, staffList, departments,
-    currentShift, exceptions,
+    currentShift, exceptions, leaveRequests, requiredConfigs, arbeitMaxPerDay,
   } = useShiftStore()
 
   const [viewFilter, setViewFilter] = useState<ViewFilter>('all')
@@ -35,33 +36,41 @@ export function ShiftTable() {
     [viewYear, viewMonth, exceptions],
   )
 
-  if (!currentShift) return null
-
+  // フックはすべて早期リターンより前で呼ぶ（フックルール順守）
   const entryMap = useMemo(() => {
     const m = new Map<string, { status: ShiftStatus; isLocked: boolean }>()
-    for (const e of currentShift.entries) {
+    for (const e of currentShift?.entries ?? []) {
       m.set(`${e.staffId}::${e.date}`, { status: e.status, isLocked: e.isLocked })
     }
     return m
-  }, [currentShift.entries])
+  }, [currentShift?.entries])
 
-  // フィルター済みのスタッフ
-  const filterStaff = (s: typeof staffList[0]) => {
-    if (viewFilter === 'regular') return s.staffType !== 'arbeit'
-    if (viewFilter === 'arbeit')  return s.staffType === 'arbeit'
-    return true
-  }
+  // 承認済み希望休のキーセット（申請由来の休みを色分けするため）
+  const requestedKeys = useMemo(() => {
+    const s = new Set<string>()
+    for (const r of leaveRequests) {
+      if (r.status === 'approved') s.add(`${r.staffId}::${r.date}`)
+    }
+    return s
+  }, [leaveRequests])
 
-  // 部署ごとにスタッフをグループ化（フィルター適用）
-  const deptGroups = departments.map(dept => ({
-    dept,
-    staffMembers: staffList.filter(s => s.primaryDeptId === dept.id && s.isActive && filterStaff(s)),
-    // 人数表示用: 正社員・パートのみカウント（フィルターに関係なく常に計算）
-    regularStaff: staffList.filter(s => s.primaryDeptId === dept.id && s.isActive && s.staffType !== 'arbeit'),
-  })).filter(g => g.staffMembers.length > 0)
+  if (!currentShift) return null
 
-  // アルバイト全体（全部署合計）
+  // 部署ごとにスタッフをグループ化（社員・パートのみ。アルバイトは別カテゴリ）
+  const deptGroups = departments.map(dept => {
+    const members = staffList.filter(s => s.primaryDeptId === dept.id && s.isActive && s.staffType !== 'arbeit')
+    return { dept, staffMembers: members, regularStaff: members }
+  }).filter(g => g.staffMembers.length > 0)
+
+  // アルバイト全体（部署に関係なく independent なカテゴリとして表示）
   const allArbeit = staffList.filter(s => s.isActive && s.staffType === 'arbeit')
+
+  // 全アクティブスタッフ（総計行に使用）
+  const allActive = staffList.filter(s => s.isActive)
+
+  // 表示フィルター
+  const showRegular = viewFilter !== 'arbeit'
+  const showArbeit  = viewFilter !== 'regular'
 
   const getStatus = (staffId: string, dateStr: string, isBusinessDay: boolean): ShiftStatus => {
     const e = entryMap.get(`${staffId}::${dateStr}`)
@@ -129,7 +138,7 @@ export function ShiftTable() {
           </thead>
 
           <tbody>
-            {deptGroups.map(({ dept, staffMembers, regularStaff }) => (
+            {showRegular && deptGroups.map(({ dept, staffMembers, regularStaff }) => (
               <Fragment key={dept.id}>
                 {/* ─── 部署区切り行（人数表示付き）─── */}
                 <tr>
@@ -149,13 +158,28 @@ export function ShiftTable() {
                       )
                     }
                     const workCount = regularStaff.filter(s => isWork(s.id, day.dateStr)).length
-                    const total = regularStaff.length
-                    const isLow = workCount < Math.ceil(total * 0.5)
+                    // 必要人数（設定があれば）と比較して3段階に色分け
+                    const req = getRequiredCount(dept.id, day.dateStr, day.weekday, requiredConfigs)
+                    const hasReq = req.preferred > 0 || req.min > 0
+                    let cellColor = (DEPT_COLOR[dept.id] ?? DEPT_COLOR_DEFAULT).count
+                    let title = ''
+                    if (hasReq) {
+                      title = `必要 最低${req.min}・理想${req.preferred}／出勤${workCount}`
+                      if (workCount < req.min) {
+                        cellColor = 'text-red-700 bg-red-100'        // 最低未達（深刻）
+                      } else if (workCount < req.preferred) {
+                        cellColor = 'text-amber-700 bg-amber-100'     // 理想未達（注意）
+                      }
+                    }
                     return (
-                      <td key={day.dateStr} className={clsx(
-                        'text-center text-[10px] font-bold border border-gray-200 py-0.5',
-                        isLow ? 'text-red-600 bg-red-50' : (DEPT_COLOR[dept.id] ?? DEPT_COLOR_DEFAULT).count,
-                      )}>
+                      <td
+                        key={day.dateStr}
+                        title={title}
+                        className={clsx(
+                          'text-center text-[10px] font-bold border border-gray-200 py-0.5',
+                          cellColor,
+                        )}
+                      >
                         {workCount}
                       </td>
                     )
@@ -190,6 +214,7 @@ export function ShiftTable() {
                             status={status}
                             isLocked={entry?.isLocked ?? false}
                             isClosed={!day.isBusinessDay}
+                            isRequested={requestedKeys.has(`${staff.id}::${day.dateStr}`)}
                           />
                         </td>
                       )
@@ -199,28 +224,88 @@ export function ShiftTable() {
               </Fragment>
             ))}
 
-            {/* ─── アルバイト合計行（全員 or アルバイト表示時） ─── */}
-            {viewFilter !== 'regular' && allArbeit.length > 0 && (
-              <tr>
-                <td className="sticky left-0 z-10 px-2 py-0.5 text-[11px] font-bold border-y border-gray-200 bg-amber-100 text-amber-800">
-                  ▍バイト計
-                </td>
-                {days.map(day => {
-                  if (!day.isBusinessDay) {
-                    return <td key={day.dateStr} className="border border-gray-200 bg-amber-50 opacity-30" />
-                  }
-                  const count = allArbeit.filter(s => isWork(s.id, day.dateStr)).length
-                  return (
-                    <td key={day.dateStr} className={clsx(
-                      'text-center text-[10px] font-bold border border-gray-200 py-0.5',
-                      'bg-amber-50 text-amber-700',
-                    )}>
-                      {count}
+            {/* ─── アルバイト カテゴリ（独立セクション）─── */}
+            {showArbeit && allArbeit.length > 0 && (
+              <Fragment>
+                {/* 区切り行（人数表示付き。他部署と統一）*/}
+                <tr>
+                  <td className="sticky left-0 z-10 px-2 py-0.5 text-[11px] font-bold border-y border-gray-200 bg-amber-100 text-amber-800">
+                    ▍アルバイト
+                  </td>
+                  {days.map(day => {
+                    if (!day.isBusinessDay) {
+                      return <td key={day.dateStr} className="border border-gray-200 bg-amber-50 opacity-30" />
+                    }
+                    const count = allArbeit.filter(s => isWork(s.id, day.dateStr)).length
+                    // 上限（arbeitMaxPerDay）超過は注意色
+                    const over = count > arbeitMaxPerDay
+                    return (
+                      <td
+                        key={day.dateStr}
+                        title={`上限${arbeitMaxPerDay}／出勤${count}`}
+                        className={clsx(
+                          'text-center text-[10px] font-bold border border-gray-200 py-0.5',
+                          over ? 'text-red-700 bg-red-100' : 'bg-amber-50 text-amber-700',
+                        )}
+                      >
+                        {count}
+                      </td>
+                    )
+                  })}
+                </tr>
+                {/* アルバイト各人の行 */}
+                {allArbeit.map(staff => (
+                  <tr key={staff.id} className="hover:bg-yellow-50/30">
+                    <td className="sticky left-0 z-10 bg-white border border-gray-200 px-2 py-0.5 whitespace-nowrap">
+                      <div className="flex items-center gap-1">
+                        <span className="text-[9px] px-1 py-0 rounded font-bold bg-gray-100 text-gray-600">
+                          {STAFF_TYPE_LABEL[staff.staffType]}
+                        </span>
+                        <span className="font-medium text-gray-800">{staff.name}</span>
+                      </div>
                     </td>
-                  )
-                })}
-              </tr>
+                    {days.map(day => {
+                      const key = `${staff.id}::${day.dateStr}`
+                      const entry = entryMap.get(key)
+                      const status = getStatus(staff.id, day.dateStr, day.isBusinessDay)
+                      return (
+                        <td key={day.dateStr} className="border border-gray-100 p-0.5">
+                          <ShiftCell
+                            staffId={staff.id}
+                            date={day.dateStr}
+                            status={status}
+                            isLocked={entry?.isLocked ?? false}
+                            isClosed={!day.isBusinessDay}
+                            isRequested={requestedKeys.has(`${staff.id}::${day.dateStr}`)}
+                          />
+                        </td>
+                      )
+                    })}
+                  </tr>
+                ))}
+              </Fragment>
             )}
+
+            {/* ─── 総計行（その日の全出勤者数）─── */}
+            <tr>
+              <td className="sticky left-0 z-10 px-2 py-0.5 text-[11px] font-bold border-y border-gray-300 bg-slate-200 text-slate-700">
+                ▍総計
+              </td>
+              {days.map(day => {
+                if (!day.isBusinessDay) {
+                  return <td key={day.dateStr} className="border border-gray-200 bg-slate-50 opacity-30" />
+                }
+                const total = allActive.filter(s => isWork(s.id, day.dateStr)).length
+                return (
+                  <td key={day.dateStr} className={clsx(
+                    'text-center text-[10px] font-bold border border-gray-300 py-0.5',
+                    'bg-slate-100 text-slate-700',
+                  )}>
+                    {total}
+                  </td>
+                )
+              })}
+            </tr>
           </tbody>
         </table>
       </div>

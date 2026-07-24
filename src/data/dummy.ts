@@ -6,7 +6,7 @@ import type {
 // ===== 部署 =====
 export const DEPARTMENTS: Department[] = [
   { id: 'dept-meat',    name: '精肉',  canDualWithIds: [],               displayOrder: 1 },
-  { id: 'dept-cashier', name: 'レジ',  canDualWithIds: ['dept-gift'],    displayOrder: 2 },
+  { id: 'dept-cashier', name: '接客',  canDualWithIds: ['dept-gift'],    displayOrder: 2 },
   { id: 'dept-gift',    name: 'ギフト', canDualWithIds: ['dept-cashier'], displayOrder: 3 },
 ]
 

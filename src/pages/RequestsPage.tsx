@@ -26,7 +26,7 @@ function cycleType(current: LeaveRequestType | undefined): LeaveRequestType | un
 export function RequestsPage() {
   const {
     staffList, leaveRequests, viewYear, viewMonth,
-    addLeaveRequest, approveLeave, rejectLeave, exceptions,
+    addLeaveRequest, approveLeave, rejectLeave, removeLeaveRequest, exceptions,
   } = useShiftStore()
 
   const [selectedStaffId, setSelectedStaffId] = useState('')
@@ -60,6 +60,17 @@ export function RequestsPage() {
 
   const handleTapDate = (dateStr: string, isBusinessDay: boolean) => {
     if (!isBusinessDay || !selectedStaffId) return
+    // まだ選択しておらず、かつ既に申請済みの日 → 二重申請の確認
+    const alreadySelected = selection.has(dateStr)
+    const existing = existingRequests.get(dateStr)
+    if (!alreadySelected && existing) {
+      const typeLabel = existing.type === 'off' ? '公休' : '有給'
+      const statusLabel = existing.status === 'approved' ? '承認済み' : '申請中'
+      const ok = window.confirm(
+        `この日はすでに${typeLabel}が${statusLabel}です。\n重ねて申請の操作をしますか？`
+      )
+      if (!ok) return
+    }
     setSelection(prev => {
       const next = new Map(prev)
       const next_type = cycleType(next.get(dateStr))
@@ -87,16 +98,17 @@ export function RequestsPage() {
   ]
   while (calGrid.length % 7 !== 0) calGrid.push(null)
 
-  // 選択スタッフの既存申請日セット
+  // 選択スタッフの既存申請（却下は除く）: date → {type, status}
   const existingRequests = useMemo(() => {
-    if (!selectedStaffId) return new Map<string, LeaveRequestType>()
-    const m = new Map<string, LeaveRequestType>()
+    const m = new Map<string, { type: LeaveRequestType; status: 'pending' | 'approved' }>()
+    if (!selectedStaffId) return m
     leaveRequests
       .filter(r =>
         r.staffId === selectedStaffId &&
+        r.status !== 'rejected' &&
         r.date.startsWith(`${calYear}-${String(calMonth).padStart(2, '0')}`)
       )
-      .forEach(r => m.set(r.date, r.requestType))
+      .forEach(r => m.set(r.date, { type: r.requestType, status: r.status as 'pending' | 'approved' }))
     return m
   }, [leaveRequests, selectedStaffId, calYear, calMonth])
 
@@ -217,10 +229,12 @@ export function RequestsPage() {
                   cellClass = 'bg-green-500 text-white'
                   subLabel = '有給'
                 } else if (existingType) {
-                  cellClass = existingType === 'off'
+                  const isApproved = existingType.status === 'approved'
+                  cellClass = existingType.type === 'off'
                     ? 'bg-blue-100 text-blue-700 ring-1 ring-blue-300'
                     : 'bg-green-100 text-green-700 ring-1 ring-green-300'
-                  subLabel = existingType === 'off' ? '申請中' : '申請中'
+                  // 何を申請中か（公休/有給）を表示。承認済みは ✓ 付き
+                  subLabel = (existingType.type === 'off' ? '公休' : '有給') + (isApproved ? '✓' : '')
                 } else if (!day.isBusinessDay) {
                   cellClass = 'opacity-25 cursor-default'
                 } else {
@@ -327,16 +341,25 @@ export function RequestsPage() {
                     <span className={clsx('text-[11px] px-2 py-0.5 rounded-full font-medium shrink-0', STATUS_COLOR[req.status])}>
                       {STATUS_LABEL[req.status]}
                     </span>
-                    {req.status === 'pending' && (
-                      <div className="flex gap-1 shrink-0">
-                        <button onClick={() => approveLeave(req.id)} className="p-1.5 bg-green-100 text-green-700 rounded-lg hover:bg-green-200">
-                          <Check size={14} />
-                        </button>
-                        <button onClick={() => rejectLeave(req.id)} className="p-1.5 bg-red-100 text-red-700 rounded-lg hover:bg-red-200">
-                          <X size={14} />
-                        </button>
-                      </div>
-                    )}
+                    <div className="flex gap-1 shrink-0">
+                      {req.status === 'pending' && (
+                        <>
+                          <button onClick={() => approveLeave(req.id)} className="p-1.5 bg-green-100 text-green-700 rounded-lg hover:bg-green-200">
+                            <Check size={14} />
+                          </button>
+                          <button onClick={() => rejectLeave(req.id)} className="p-1.5 bg-red-100 text-red-700 rounded-lg hover:bg-red-200">
+                            <X size={14} />
+                          </button>
+                        </>
+                      )}
+                      <button
+                        onClick={() => removeLeaveRequest(req.id)}
+                        className="p-1.5 text-gray-300 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors"
+                        title="申請を削除"
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    </div>
                   </div>
                 )
               })

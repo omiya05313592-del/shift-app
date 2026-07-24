@@ -146,7 +146,7 @@ function shuffle<T>(arr: T[]): T[] {
 // 必要人数ヘルパー（優先順: daily > range > weekday）
 // =============================================================
 
-function getRequiredCount(
+export function getRequiredCount(
   deptId: string,
   dateStr: string,
   weekday: number,
@@ -502,10 +502,13 @@ export function generateShift(config: ShiftConfig): GenerateResult {
         entryMap, reasons, req.staffId, req.date, req.requestType,
         `希望休（承認済・${typeLabel}）`,
       )
+      // 承認済み希望休は確定なので自動ロック（後から長押しで解除可能）
+      const entry = entryMap.get(makeKey(req.staffId, req.date))
+      if (entry) entry.isLocked = true
       if (changed) {
         count++
         const name = staffList.find(s => s.id === req.staffId)?.name ?? req.staffId
-        details.push(`${name} ${req.date} → ${typeLabel}（承認済希望休）`)
+        details.push(`${name} ${req.date} → ${typeLabel}（承認済希望休・ロック）`)
       }
     }
     phaseLogs.push({ phase: 'Step 4: 希望休（承認済）', count, details })

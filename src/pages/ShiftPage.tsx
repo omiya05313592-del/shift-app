@@ -1,13 +1,16 @@
 import { useState } from 'react'
-import { Zap, Download, Check, Save } from 'lucide-react'
+import { Zap, Download, Check, Save, ZoomIn, ZoomOut, RotateCcw, ListChecks, Eraser } from 'lucide-react'
 import { useShiftStore } from '../store/shiftStore'
 import { ShiftTable } from '../components/shift/ShiftTable'
 import { ViolationPanel } from '../components/shift/ViolationPanel'
 import { DebugPanel } from '../components/shift/DebugPanel'
+import { BulkSetPanel } from '../components/shift/BulkSetPanel'
 
 export function ShiftPage() {
-  const { currentShift, generateShift, viewYear, viewMonth } = useShiftStore()
+  const { currentShift, generateShift, clearShift, viewYear, viewMonth, zoom, setZoom } = useShiftStore()
   const [savedToast, setSavedToast] = useState(false)
+  const [bulkOpen, setBulkOpen] = useState(false)
+  const [confirmClear, setConfirmClear] = useState(false)
 
   // データは常時自動保存されているので、ボタンは「保存済み」を明示するだけ
   const handleSave = () => {
@@ -30,6 +33,13 @@ export function ShiftPage() {
         {currentShift && (
           <>
             <button
+              onClick={() => setBulkOpen(true)}
+              className="flex items-center gap-1 text-white bg-indigo-600 text-sm font-semibold px-3 py-1.5 rounded-lg hover:bg-indigo-700"
+            >
+              <ListChecks size={15} />
+              一括設定
+            </button>
+            <button
               onClick={handleSave}
               className="flex items-center gap-1 text-gray-600 text-sm px-2 py-1.5 rounded-lg hover:bg-gray-100 border border-gray-200"
             >
@@ -40,12 +50,53 @@ export function ShiftPage() {
               <Download size={15} />
               Excel
             </button>
-            <span className="text-xs text-gray-400 ml-auto">
-              {viewYear}年{viewMonth}月 · 下書き
-            </span>
+            {confirmClear ? (
+              <span className="flex items-center gap-1">
+                <span className="text-xs text-gray-500">初期化する？</span>
+                <button
+                  onClick={() => { clearShift(); setConfirmClear(false) }}
+                  className="text-sm font-bold text-white bg-red-500 px-2.5 py-1.5 rounded-lg hover:bg-red-600"
+                >
+                  はい
+                </button>
+                <button
+                  onClick={() => setConfirmClear(false)}
+                  className="text-sm text-gray-600 bg-gray-100 px-2.5 py-1.5 rounded-lg hover:bg-gray-200"
+                >
+                  やめる
+                </button>
+              </span>
+            ) : (
+              <button
+                onClick={() => setConfirmClear(true)}
+                className="flex items-center gap-1 text-red-500 text-sm px-2 py-1.5 rounded-lg hover:bg-red-50 border border-red-200"
+              >
+                <Eraser size={15} />
+                初期化
+              </button>
+            )}
+
+            {/* ズーム操作 */}
+            <div className="flex items-center gap-0.5 ml-auto border border-gray-200 rounded-lg px-1 py-0.5">
+              <button onClick={() => setZoom(zoom - 0.1)} title="縮小" className="p-1 text-gray-500 hover:bg-gray-100 rounded">
+                <ZoomOut size={15} />
+              </button>
+              <span className="text-xs text-gray-500 font-medium w-9 text-center tabular-nums">
+                {Math.round(zoom * 100)}%
+              </span>
+              <button onClick={() => setZoom(zoom + 0.1)} title="拡大" className="p-1 text-gray-500 hover:bg-gray-100 rounded">
+                <ZoomIn size={15} />
+              </button>
+              <button onClick={() => setZoom(1)} title="等倍に戻す" className="p-1 text-gray-400 hover:bg-gray-100 rounded">
+                <RotateCcw size={13} />
+              </button>
+            </div>
           </>
         )}
       </div>
+
+      {/* 一括設定パネル */}
+      {bulkOpen && <BulkSetPanel onClose={() => setBulkOpen(false)} />}
 
       {/* 保存トースト */}
       {savedToast && (

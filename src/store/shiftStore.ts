@@ -39,10 +39,17 @@ type ShiftStore = {
   viewMonth: number
   setViewMonth: (year: number, month: number) => void
 
+  // ===== シフト表の表示倍率（ズーム）=====
+  zoom: number
+  setZoom: (z: number) => void
+
   // ===== シフトデータ =====
   currentShift: MonthlyShift | null
   violations: Violation[]
   debugInfo: ShiftDebugInfo | null
+  // 生成直後の原本（初期化＝手を加える前に戻す 用）
+  originalShift: MonthlyShift | null
+  originalViolations: Violation[]
 
   // ===== 希望休 =====
   leaveRequests: LeaveRequest[]
@@ -55,8 +62,19 @@ type ShiftStore = {
 
   // ===== シフト操作 =====
   generateShift: () => void
+  clearShift: () => void   // 生成したシフトだけをクリア（スタッフ・設定・申請は残す）
   updateEntry: (staffId: string, date: string, status: ShiftStatus) => void
   toggleLock: (staffId: string, date: string) => void
+  // 従業員1人の当月全日を一括ロック/解除（トグル）
+  lockStaffMonth: (staffId: string) => void
+  // 対象スタッフ×期間を一括設定（lock=true で同時にロック）
+  bulkSetEntries: (params: {
+    staffIds: string[]
+    startDate: string
+    endDate: string
+    status: ShiftStatus
+    lock: boolean
+  }) => void
 
   // ===== 希望休操作 =====
   addLeaveRequest: (req: Omit<LeaveRequest, 'id'>) => void
@@ -118,9 +136,14 @@ export const useShiftStore = create<ShiftStore>()(
   viewMonth: now.getMonth() + 1,
   setViewMonth: (year, month) => set({ viewYear: year, viewMonth: month }),
 
+  zoom: 1,
+  setZoom: (z) => set({ zoom: Math.min(2, Math.max(0.6, z)) }),
+
   currentShift: null,
   violations: [],
   debugInfo: null,
+  originalShift: null,
+  originalViolations: [],
 
   leaveRequests: [],
   unavailableDates: [],
@@ -160,7 +183,29 @@ export const useShiftStore = create<ShiftStore>()(
       generatedAt: new Date().toISOString(),
     }
 
-    set({ currentShift: shift, violations: result.violations, debugInfo: result.debugInfo })
+    // 生成直後の状態を原本として保存（初期化で手を加える前に戻すため・deep copy）
+    const original: MonthlyShift = JSON.parse(JSON.stringify(shift))
+    set({
+      currentShift: shift,
+      violations: result.violations,
+      debugInfo: result.debugInfo,
+      originalShift: original,
+      originalViolations: [...result.violations],
+    })
+  },
+
+  // 初期化 = 生成直後の原本に戻す（手動編集・ロック・一括設定を取り消す）
+  clearShift: () => {
+    const { originalShift, originalViolations } = get()
+    if (originalShift) {
+      set({
+        currentShift: JSON.parse(JSON.stringify(originalShift)),
+        violations: [...originalViolations],
+        debugInfo: null,
+      })
+    } else {
+      set({ currentShift: null, violations: [], debugInfo: null })
+    }
   },
 
   updateEntry: (staffId, date, status) => {
@@ -183,6 +228,42 @@ export const useShiftStore = create<ShiftStore>()(
           ? { ...e, isLocked: !e.isLocked }
           : e
       )
+      return { currentShift: { ...state.currentShift, entries } }
+    })
+  },
+
+  lockStaffMonth: (staffId) => {
+    set(state => {
+      if (!state.currentShift) return state
+      const ym = `${state.viewYear}-${String(state.viewMonth).padStart(2, '0')}`
+      // 定休(closed)・在籍外(absent)を除いた対象
+      const targets = state.currentShift.entries.filter(
+        e => e.staffId === staffId && e.date.startsWith(ym) &&
+             e.status !== 'closed' && e.status !== 'absent'
+      )
+      // 全てロック済みなら解除、そうでなければ全ロック（トグル）
+      const allLocked = targets.length > 0 && targets.every(e => e.isLocked)
+      const entries = state.currentShift.entries.map(e =>
+        (e.staffId === staffId && e.date.startsWith(ym) &&
+         e.status !== 'closed' && e.status !== 'absent')
+          ? { ...e, isLocked: !allLocked }
+          : e
+      )
+      return { currentShift: { ...state.currentShift, entries } }
+    })
+  },
+
+  bulkSetEntries: ({ staffIds, startDate, endDate, status, lock }) => {
+    set(state => {
+      if (!state.currentShift) return state
+      const idset = new Set(staffIds)
+      const entries = state.currentShift.entries.map(e => {
+        if (!idset.has(e.staffId)) return e
+        if (e.date < startDate || e.date > endDate) return e
+        // 定休・在籍外は変更しない
+        if (e.status === 'closed' || e.status === 'absent') return e
+        return { ...e, status, isLocked: lock ? true : e.isLocked }
+      })
       return { currentShift: { ...state.currentShift, entries } }
     })
   },
@@ -340,10 +421,13 @@ export const useShiftStore = create<ShiftStore>()(
         statusPeriods: state.statusPeriods,
         coreWorkDays: state.coreWorkDays,
         arbeitMaxPerDay: state.arbeitMaxPerDay,
+        zoom: state.zoom,
         viewYear: state.viewYear,
         viewMonth: state.viewMonth,
         currentShift: state.currentShift,
         violations: state.violations,
+        originalShift: state.originalShift,
+        originalViolations: state.originalViolations,
         leaveRequests: state.leaveRequests,
         unavailableDates: state.unavailableDates,
         arbeitAvailabilities: state.arbeitAvailabilities,

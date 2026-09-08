@@ -131,6 +131,7 @@ function findAltOffDay(
     if (excludeDates.has(d.dateStr)) return false
     const e = em.get(makeKey(staffId, d.dateStr))
     if (!e || e.status !== 'work') return false   // 現在出勤の日のみ
+    if (e.isLocked) return false                  // ロック済みは代替休みに使わない
 
     // ペア制約: 代替休みを置いてもOKか
     return pairConstraints
@@ -185,6 +186,7 @@ function applyChange(
   const key = makeKey(staffId, dateStr)
   const entry = em.get(key)
   if (!entry) return false
+  if (entry.isLocked) return false   // ロック済みは Repair でも変更しない
   const before = entry.status
   if (before === newStatus) return false
   entry.status = newStatus

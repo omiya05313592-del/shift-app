@@ -1,4 +1,5 @@
 import { useMemo, Fragment, useState } from 'react'
+import { Lock } from 'lucide-react'
 import { useShiftStore } from '../../store/shiftStore'
 import { buildMonthDays } from '../../utils/calendar'
 import { getRequiredCount } from '../../utils/shiftGenerator'
@@ -27,6 +28,7 @@ export function ShiftTable() {
   const {
     viewYear, viewMonth, staffList, departments,
     currentShift, exceptions, leaveRequests, requiredConfigs, arbeitMaxPerDay,
+    zoom, lockStaffMonth,
   } = useShiftStore()
 
   const [viewFilter, setViewFilter] = useState<ViewFilter>('all')
@@ -82,6 +84,64 @@ export function ShiftTable() {
     return !e || e.status === 'work'
   }
 
+  // その従業員の当月（営業日・定休/在籍外を除く）が全てロック済みか
+  const isRowLocked = (staffId: string) => {
+    const targets = days
+      .filter(d => d.isBusinessDay)
+      .map(d => entryMap.get(`${staffId}::${d.dateStr}`))
+      .filter((e): e is { status: ShiftStatus; isLocked: boolean } =>
+        !!e && e.status !== 'closed' && e.status !== 'absent')
+    return targets.length > 0 && targets.every(e => e.isLocked)
+  }
+
+  // 日付ヘッダのセル群（theadとアルバイト欄上の再掲で共用）
+  const renderDayCells = () => days.map(day => (
+    <th
+      key={day.dateStr}
+      className={clsx(
+        'border border-gray-200 text-center px-0 py-1 min-w-[34px] w-9',
+        day.weekday === 0 ? 'bg-red-50 text-red-600' :
+        day.weekday === 6 ? 'bg-blue-50 text-blue-600' :
+        day.isHoliday    ? 'bg-red-50 text-red-500' :
+        'bg-gray-50 text-gray-600',
+        !day.isBusinessDay && 'opacity-50',
+      )}
+    >
+      <div className="font-bold leading-tight">{day.date.getDate()}</div>
+      <div className="text-[10px] leading-tight">{WEEKDAY_SHORT[day.weekday]}</div>
+    </th>
+  ))
+
+  // スタッフ名セル（行ロックボタン付き）
+  const renderNameCell = (staff: typeof staffList[0]) => {
+    const rowLocked = isRowLocked(staff.id)
+    return (
+      <td className="sticky left-0 z-10 bg-white border border-gray-200 px-2 py-0.5 whitespace-nowrap">
+        <div className="flex items-center gap-1">
+          <span className={clsx(
+            'text-[9px] px-1 py-0 rounded font-bold',
+            staff.staffType === 'employee' ? 'bg-blue-100 text-blue-700' :
+            staff.staffType === 'part'     ? 'bg-green-100 text-green-700' :
+            'bg-gray-100 text-gray-600',
+          )}>
+            {STAFF_TYPE_LABEL[staff.staffType]}
+          </span>
+          <span className="font-medium text-gray-800">{staff.name}</span>
+          <button
+            onClick={() => lockStaffMonth(staff.id)}
+            title={rowLocked ? 'この人の月間ロックを解除' : 'この人を今月まるごとロック'}
+            className={clsx(
+              'ml-auto p-0.5 rounded transition-colors',
+              rowLocked ? 'text-amber-500 bg-amber-50' : 'text-gray-300 hover:text-amber-500 hover:bg-amber-50',
+            )}
+          >
+            <Lock size={11} />
+          </button>
+        </div>
+      </td>
+    )
+  }
+
   return (
     <div>
       {/* ─── 表示切り替えフィルター ─── */}
@@ -109,8 +169,8 @@ export function ShiftTable() {
         ))}
       </div>
 
-      {/* ─── シフト表 ─── */}
-      <div className="overflow-x-auto">
+      {/* ─── シフト表（ズーム適用）─── */}
+      <div className="overflow-x-auto" style={{ zoom }}>
         <table className="border-collapse text-xs" style={{ minWidth: `${72 + days.length * 36}px` }}>
           {/* 日付ヘッダ */}
           <thead>
@@ -118,22 +178,7 @@ export function ShiftTable() {
               <th className="sticky left-0 z-20 bg-gray-100 border border-gray-200 px-2 py-1 text-left min-w-[72px] text-xs font-semibold text-gray-600">
                 スタッフ
               </th>
-              {days.map(day => (
-                <th
-                  key={day.dateStr}
-                  className={clsx(
-                    'border border-gray-200 text-center px-0 py-1 min-w-[34px] w-9',
-                    day.weekday === 0 ? 'bg-red-50 text-red-600' :
-                    day.weekday === 6 ? 'bg-blue-50 text-blue-600' :
-                    day.isHoliday    ? 'bg-red-50 text-red-500' :
-                    'bg-gray-50 text-gray-600',
-                    !day.isBusinessDay && 'opacity-50',
-                  )}
-                >
-                  <div className="font-bold leading-tight">{day.date.getDate()}</div>
-                  <div className="text-[10px] leading-tight">{WEEKDAY_SHORT[day.weekday]}</div>
-                </th>
-              ))}
+              {renderDayCells()}
             </tr>
           </thead>
 
@@ -189,19 +234,7 @@ export function ShiftTable() {
                 {/* ─── スタッフ行 ─── */}
                 {staffMembers.map(staff => (
                   <tr key={staff.id} className="hover:bg-yellow-50/30">
-                    <td className="sticky left-0 z-10 bg-white border border-gray-200 px-2 py-0.5 whitespace-nowrap">
-                      <div className="flex items-center gap-1">
-                        <span className={clsx(
-                          'text-[9px] px-1 py-0 rounded font-bold',
-                          staff.staffType === 'employee' ? 'bg-blue-100 text-blue-700' :
-                          staff.staffType === 'part'     ? 'bg-green-100 text-green-700' :
-                          'bg-gray-100 text-gray-600',
-                        )}>
-                          {STAFF_TYPE_LABEL[staff.staffType]}
-                        </span>
-                        <span className="font-medium text-gray-800">{staff.name}</span>
-                      </div>
-                    </td>
+                    {renderNameCell(staff)}
                     {days.map(day => {
                       const key = `${staff.id}::${day.dateStr}`
                       const entry = entryMap.get(key)
@@ -227,6 +260,13 @@ export function ShiftTable() {
             {/* ─── アルバイト カテゴリ（独立セクション）─── */}
             {showArbeit && allArbeit.length > 0 && (
               <Fragment>
+                {/* 日付ヘッダ再掲（アルバイト欄の視認性向上）*/}
+                <tr>
+                  <th className="sticky left-0 z-10 bg-gray-100 border border-gray-200 px-2 py-1 text-left min-w-[72px] text-[11px] font-semibold text-gray-500">
+                    日付
+                  </th>
+                  {renderDayCells()}
+                </tr>
                 {/* 区切り行（人数表示付き。他部署と統一）*/}
                 <tr>
                   <td className="sticky left-0 z-10 px-2 py-0.5 text-[11px] font-bold border-y border-gray-200 bg-amber-100 text-amber-800">
@@ -256,14 +296,7 @@ export function ShiftTable() {
                 {/* アルバイト各人の行 */}
                 {allArbeit.map(staff => (
                   <tr key={staff.id} className="hover:bg-yellow-50/30">
-                    <td className="sticky left-0 z-10 bg-white border border-gray-200 px-2 py-0.5 whitespace-nowrap">
-                      <div className="flex items-center gap-1">
-                        <span className="text-[9px] px-1 py-0 rounded font-bold bg-gray-100 text-gray-600">
-                          {STAFF_TYPE_LABEL[staff.staffType]}
-                        </span>
-                        <span className="font-medium text-gray-800">{staff.name}</span>
-                      </div>
-                    </td>
+                    {renderNameCell(staff)}
                     {days.map(day => {
                       const key = `${staff.id}::${day.dateStr}`
                       const entry = entryMap.get(key)

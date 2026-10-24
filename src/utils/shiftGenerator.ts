@@ -568,10 +568,25 @@ export function generateShift(config: ShiftConfig): GenerateResult {
   // ────────────────────────────────────────────────────────
   // アルバイトは「何人以上にしない」という上限で管理する。
   // 上限を超えた日はランダムに off にする（monthlyOffDays = 0 のバイトのみ対象）。
+  // ただし「出勤可能日」に設定された日のバイトは保護し、上限超過でも出勤のまま残す。
+  //   → 出勤可能日の設定どおりに出力し、超過はシフト表で赤く表示して手動調整する。
   {
     let count = 0
     const details: string[] = []
     const arbeitOnly = activeStaff.filter(s => s.staffType === 'arbeit' && s.monthlyOffDays === 0)
+
+    // この月に出勤可能日が設定されているバイトの、可能日セット
+    const availByStaff = new Map<string, Set<string>>()
+    for (const a of arbeitAvailabilities) {
+      if (a.year === year && a.month === month) {
+        availByStaff.set(a.staffId, new Set(a.availableDates))
+      }
+    }
+    // その日・そのバイトが「出勤可能日として明示設定された」なら保護
+    const isProtectedWork = (staffId: string, dateStr: string) => {
+      const set = availByStaff.get(staffId)
+      return !!set && set.has(dateStr)
+    }
 
     if (arbeitOnly.length > 0 && arbeitMaxPerDay > 0) {
       for (const day of businessDays) {
@@ -581,7 +596,10 @@ export function generateShift(config: ShiftConfig): GenerateResult {
         })
         if (working.length <= arbeitMaxPerDay) continue
 
-        const toOff = shuffle(working).slice(arbeitMaxPerDay)
+        // 可能日で保護される人は削らない。削れるのは保護対象外のみ。
+        const removable = working.filter(s => !isProtectedWork(s.id, day.dateStr))
+        const overflow = working.length - arbeitMaxPerDay
+        const toOff = shuffle(removable).slice(0, overflow)
         for (const staff of toOff) {
           const changed = setStatus(
             entryMap, reasons, staff.id, day.dateStr, 'off',

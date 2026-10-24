@@ -118,6 +118,7 @@ export function ShiftPage() {
         <div className="flex items-center gap-1"><span className="inline-block w-5 h-4 rounded cell-off text-center text-[10px] leading-4">休</span>公休</div>
         <div className="flex items-center gap-1"><span className="inline-block w-5 h-4 rounded cell-paid text-center text-[10px] leading-4">有</span>有給</div>
         <div className="flex items-center gap-1"><span className="inline-block w-5 h-4 rounded cell-closed text-center text-[10px] leading-4">定</span>定休</div>
+        <div className="flex items-center gap-1"><span className="inline-block w-5 h-4 rounded bg-red-100 text-red-700 text-center text-[10px] leading-4 font-bold">3</span>人数が赤=上限超過</div>
         <div className="text-[10px] text-gray-400 ml-auto">タップで変更 / 長押しでロック</div>
       </div>
 
